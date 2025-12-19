@@ -1,6 +1,6 @@
 
 import { z } from 'zod';
-import { insertConfigSchema, config, sessions, metrics, logs, health } from './schema';
+import { insertConfigSchema, config, sessions, metrics, logs, health, payouts } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -108,6 +108,30 @@ export const api = {
       input: z.object({ limit: z.string().optional() }).optional(),
       responses: {
         200: z.array(z.custom<typeof logs.$inferSelect>()),
+      },
+    },
+  },
+  settlement: {
+    settle: {
+      method: 'POST' as const,
+      path: '/api/settlement/:sessionId',
+      responses: {
+        200: z.object({
+          success: z.boolean(),
+          payout: z.custom<typeof payouts.$inferSelect>().optional(),
+          message: z.string().optional(),
+        }),
+        400: errorSchemas.validation,
+        404: errorSchemas.notFound,
+      },
+    },
+  },
+  payouts: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/payouts',
+      responses: {
+        200: z.array(z.custom<typeof payouts.$inferSelect>()),
       },
     },
   },

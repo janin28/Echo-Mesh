@@ -18,16 +18,43 @@ export const config = pgTable("config", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Node Information
+export const nodes = pgTable("nodes", {
+  id: serial("id").primaryKey(),
+  nodeId: text("node_id").notNull().unique(),
+  reputation: doublePrecision("reputation").default(100), // 0-100 score
+  totalEarningsCredits: doublePrecision("total_earnings_credits").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Active/Past Sessions
 export const sessions = pgTable("sessions", {
   id: text("id").primaryKey(), // UUID from coordinator
   buyerId: text("buyer_id").notNull(),
+  nodeId: text("node_id").notNull(), // Foreign key reference
   status: text("status").notNull(), // 'active', 'idle', 'probing', 'closed', 'quarantine'
   bytesIngress: doublePrecision("bytes_ingress").default(0),
   bytesEgress: doublePrecision("bytes_egress").default(0),
+  bytesTransferred: doublePrecision("bytes_transferred").default(0),
+  errorRate: doublePrecision("error_rate").default(0), // 0-1 as decimal (0.05 = 5%)
   latencyP95: integer("latency_p95").default(0),
   startedAt: timestamp("started_at").defaultNow(),
   endedAt: timestamp("ended_at"),
+  resolvedAt: timestamp("resolved_at"), // When payout was settled
+});
+
+// Payout Records
+export const payouts = pgTable("payouts", {
+  id: serial("id").primaryKey(),
+  nodeId: text("node_id").notNull(),
+  sessionId: text("session_id").notNull(),
+  amountCredits: doublePrecision("amount_credits").notNull(),
+  status: text("status").notNull(), // 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'
+  baseRate: doublePrecision("base_rate").default(0.0005), // $0.50 per GB
+  qosPenaltyApplied: boolean("qos_penalty_applied").default(false),
+  reputationWeight: doublePrecision("reputation_weight").default(1.0),
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
 });
 
 // System Metrics (Snapshot for graphs)
@@ -67,16 +94,19 @@ export const logs = pgTable("logs", {
 
 // === SCHEMAS ===
 export const insertConfigSchema = createInsertSchema(config).omit({ id: true, updatedAt: true });
+export const insertNodeSchema = createInsertSchema(nodes).omit({ id: true, createdAt: true });
 export const insertSessionSchema = createInsertSchema(sessions);
 export const insertMetricSchema = createInsertSchema(metrics).omit({ id: true, timestamp: true });
 export const insertLogSchema = createInsertSchema(logs).omit({ id: true, timestamp: true });
-
-// === SCHEMAS ===
 export const insertHealthSchema = createInsertSchema(health).omit({ id: true, timestamp: true });
+export const insertPayoutSchema = createInsertSchema(payouts).omit({ id: true, createdAt: true });
 
 // === EXPLICIT TYPES ===
 export type Config = typeof config.$inferSelect;
 export type InsertConfig = z.infer<typeof insertConfigSchema>;
+
+export type Node = typeof nodes.$inferSelect;
+export type InsertNode = z.infer<typeof insertNodeSchema>;
 
 export type Session = typeof sessions.$inferSelect;
 export type InsertSession = z.infer<typeof insertSessionSchema>;
@@ -84,6 +114,9 @@ export type InsertSession = z.infer<typeof insertSessionSchema>;
 export type Metric = typeof metrics.$inferSelect;
 export type Health = typeof health.$inferSelect;
 export type Log = typeof logs.$inferSelect;
+
+export type Payout = typeof payouts.$inferSelect;
+export type InsertPayout = z.infer<typeof insertPayoutSchema>;
 
 // Request/Response Types
 export type ConfigUpdateRequest = Partial<InsertConfig>;
@@ -102,4 +135,14 @@ export type DashboardStats = {
   reputationScore: number;
   uptimeSeconds: number;
   health: HealthStatus;
+};
+
+export type SettlementRequest = {
+  sessionId: string;
+};
+
+export type SettlementResponse = {
+  success: boolean;
+  payout?: Payout;
+  message?: string;
 };

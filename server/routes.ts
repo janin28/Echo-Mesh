@@ -109,6 +109,38 @@ export async function registerRoutes(
     res.json(logs);
   });
 
+  // Payouts Routes
+  app.get(api.payouts.list.path, async (req, res) => {
+    const payoutsList = await storage.getPayouts();
+    res.json(payoutsList);
+  });
+
+  app.post(api.settlement.settle.path, async (req, res) => {
+    try {
+      const sessionId = req.params.sessionId;
+      
+      // Get the session to find its nodeId
+      const sessions = await storage.getSessions();
+      const session = sessions.find(s => s.id === sessionId);
+      if (!session) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+
+      const payout = await storage.settleSession(sessionId, session.nodeId);
+      
+      await storage.addLog({
+        level: "info",
+        category: "system",
+        message: `Session ${sessionId} settled with payout of ${payout.amountCredits} credits`,
+      });
+
+      res.json({ success: true, payout });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Settlement failed";
+      res.status(400).json({ success: false, message });
+    }
+  });
+
   // Background Metrics Simulation (to make the dashboard alive)
   setInterval(async () => {
     if (daemonStatus !== "running") return;

@@ -1,10 +1,10 @@
 
 import { db } from "./db";
 import {
-  config, sessions, metrics, logs, health,
+  config, sessions, metrics, logs, health, nodes, payouts,
   type Config, type InsertConfig,
   type Session, type InsertSession,
-  type Metric, type Log, type Health,
+  type Metric, type Log, type Health, type Node, type Payout,
   type ConfigUpdateRequest
 } from "@shared/schema";
 import { eq, desc, asc } from "drizzle-orm";
@@ -30,6 +30,14 @@ export interface IStorage {
   // Health
   getLatestHealth(): Promise<Health | undefined>;
   updateHealth(updates: Partial<Health>): Promise<Health>;
+
+  // Nodes
+  getOrCreateNode(nodeId: string): Promise<Node>;
+  updateNodeReputation(nodeId: string, reputation: number): Promise<Node>;
+
+  // Payouts & Settlement
+  getPayouts(): Promise<Payout[]>;
+  settleSession(sessionId: string, nodeId: string): Promise<Payout>;
 
   // Dashboard Stats (Aggregated)
   getDashboardStats(): Promise<{
@@ -130,6 +138,81 @@ export class DatabaseStorage implements IStorage {
       const [created] = await db.insert(health).values(updates as any).returning();
       return created;
     }
+  }
+
+  async getOrCreateNode(nodeId: string): Promise<Node> {
+    const [existing] = await db.select().from(nodes).where(eq(nodes.nodeId, nodeId));
+    if (existing) return existing;
+
+    const [created] = await db.insert(nodes).values({ nodeId, reputation: 100 }).returning();
+    return created;
+  }
+
+  async updateNodeReputation(nodeId: string, reputation: number): Promise<Node> {
+    const [updated] = await db.update(nodes)
+      .set({ reputation })
+      .where(eq(nodes.nodeId, nodeId))
+      .returning();
+    return updated;
+  }
+
+  async getPayouts(): Promise<Payout[]> {
+    return await db.select().from(payouts).orderBy(desc(payouts.createdAt));
+  }
+
+  async settleSession(sessionId: string, nodeId: string): Promise<Payout> {
+    // Fetch session and ensure node exists
+    const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    if (!session) throw new Error("Session not found");
+
+    const node = await this.getOrCreateNode(nodeId);
+
+    // Calculate payout using provided formula
+    const baseRate = 0.0005; // $0.50 per GB
+    const gbTransferred = Math.max(session.bytesIngress, session.bytesEgress) / (1024 ** 3);
+
+    let amount = gbTransferred * baseRate;
+    let qosPenaltyApplied = false;
+
+    // QoS Penalty: 20% reduction if error rate > 5%
+    if (session.errorRate && session.errorRate > 0.05) {
+      amount *= 0.8;
+      qosPenaltyApplied = true;
+    }
+
+    // Reputation Weight
+    const reputationWeight = node.reputation / 100;
+    const finalAmount = amount * reputationWeight;
+
+    // Create payout in transaction
+    const [payout] = await db.transaction(async (tx) => {
+      const result = await tx.insert(payouts).values({
+        nodeId: node.nodeId,
+        sessionId: session.id,
+        amountCredits: finalAmount,
+        status: "COMPLETED",
+        baseRate,
+        qosPenaltyApplied,
+        reputationWeight,
+        completedAt: new Date(),
+      }).returning();
+
+      // Update session status
+      await tx.update(sessions)
+        .set({ status: "closed", resolvedAt: new Date() })
+        .where(eq(sessions.id, sessionId));
+
+      // Update node earnings
+      const updatedNode = node;
+      updatedNode.totalEarningsCredits += finalAmount;
+      await tx.update(nodes)
+        .set({ totalEarningsCredits: updatedNode.totalEarningsCredits })
+        .where(eq(nodes.nodeId, node.nodeId));
+
+      return result;
+    });
+
+    return payout;
   }
 
   async getDashboardStats() {
