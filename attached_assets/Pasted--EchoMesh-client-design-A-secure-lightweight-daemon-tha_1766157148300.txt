@@ -1,0 +1,266 @@
+# EchoMesh client design
+
+A secure, lightweight daemon that turns idle residential bandwidth into a verifiable, policy-compliant service. Built for trust, low overhead, and clean integration with the coordinator and buyers.
+
+---
+
+## Architecture and modules
+
+- **Core service (daemon):**  
+  **Responsibilities:** process lifecycle, job/session orchestration, metering, probe execution, local control API.
+
+- **Proxy engine:**  
+  **Responsibilities:** HTTPS-only egress, per-session routing, TLS metrics, rate limiting, domain allow/block enforcement.
+
+- **Metering & QoS:**  
+  **Responsibilities:** 1-second buckets for ingress/egress bytes, latency p50/p95, error rates; signed counters for attestation.
+
+- **Probe executor:**  
+  **Responsibilities:** Handle coordinator challenges, fetch trusted endpoints, produce signed ProbeReports with nonce integrity.
+
+- **Geo & policy guard:**  
+  **Responsibilities:** Geo-fencing enforcement, region availability, category opt-outs, protocol gates.
+
+- **Security & sandbox:**  
+  **Responsibilities:** Network egress isolation, filesystem permissions, key vault, signed update verification.
+
+- **Update manager:**  
+  **Responsibilities:** Secure download, signature check, blue/green rollout, instant rollback on health failure.
+
+- **Local control API (optional):**  
+  **Responsibilities:** Start/pause/stop, set caps/schedules, export logs, show real-time status.
+
+---
+
+## Client lifecycle and flows
+
+#### Session lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Discover: Coordinator assigns session
+    Discover --> Handshake: Exchange NodeID, receive policy profile
+    Handshake --> Active: Proxy begins, metering starts
+    Active --> Probing: Coordinator challenges issued periodically
+    Probing --> Active: Probes pass; continue traffic
+    Active --> Closing: Buyer ends session or budget reached
+    Closing --> Settled: Counters sealed, receipts prepared
+    Settled --> Idle
+    Active --> Quarantine: Policy or geo violation detected
+    Quarantine --> Idle: Await manual/user action or cooldown
+```
+
+#### Probe execution flow
+
+```mermaid
+sequenceDiagram
+    participant C as Coordinator
+    participant N as Node
+    participant T as TrustedEndpoint
+
+    C->>N: ProbeRequest(SessionID, endpoint, size, nonce, ttl)
+    N->>T: HTTPS GET endpoint (size bytes)
+    T-->>N: Data + TLS metrics
+    N->>C: ProbeReport(bytes, duration, rtt, endpointSig, nonce) [NodeID-signed]
+    C->>C: Validate endpointSig, nonce, QoS thresholds
+    C-->>N: Ack or issue follow-up probe
+```
+
+---
+
+## Networking, security, and keys
+
+- **Egress policy:**  
+  **HTTPS-only**, block plain HTTP except approved probe hosts; enforce **SNI/ALPN inspection**; deny non-web ports.
+
+- **Rate limits:**  
+  **Global caps:** e.g., 5–20 Mbps configurable; **per-session caps:** GB/day and burst/sustained rates; pause/kill switches.
+
+- **Isolation:**  
+  **Network sandbox:** only egress via proxy interface; **no LAN routing**; optional container/jail mode for hard isolation.
+
+- **Key management:**  
+  **NodeID:** Ed25519 keypair; sealed storage with passphrase; rotate on reinstall; backup/export with user consent.  
+  **Signing:** Node signs ProbeReports and metering bundles; BLAKE3 hashes for access log digests.
+
+- **Privacy:**  
+  **Data minimization:** store counters, QoS summaries, hashed host/status/bytes; **no payload capture**; opt-in analytics.
+
+- **Compliance guards:**  
+  **Geo-fencing:** country and region allowlist; **category controls:** ad verification/QA only by default; user-configurable opt-outs.
+
+---
+
+## Configuration, UX, and platform support
+
+- **Install & setup:**  
+  **Flow:** download client → first run wizard (region selection, caps, schedules) → generate NodeID → connect to coordinator.
+
+- **Controls:**  
+  **Quick actions:** Start/Pause/Stop; **schedules:** active windows; **caps:** bandwidth and daily GB; **policy:** category opt-outs.
+
+- **Status views:**  
+  **Live metrics:** sessions, throughput, p95 latency, error rate; **earnings:** credits today, EMSH bonus forecast; **reputation:** score and tier.
+
+- **Export & support:**  
+  **Logs:** privacy-minimized export; **diagnostics:** probe pass rate, geo confidence; **report:** one-click issue report.
+
+- **Platforms:**  
+  **Desktop:** Windows, macOS, Linux (systemd).  
+  **Headless:** Docker image.  
+  **Router (beta):** OpenWrt package with hardware acceleration.
+
+#### Example config (YAML)
+
+```yaml
+version: 1
+node:
+  idPath: ~/.echomesh/node.key
+  regionAllow: ["PH-Mindanao", "PH-NCR"]
+  schedules:
+    - { days: ["Mon","Tue","Wed","Thu","Fri"], start: "22:00", end: "06:00" }
+network:
+  maxMbps: 10
+  maxGBPerDay: 20
+  httpsOnly: true
+  allowlistDomains: []
+  blocklistDomains: ["example-bad.com"]
+policy:
+  categoryProfile: "COMPLIANT_DEFAULT"
+  allowPlainHttpProbes: true
+security:
+  dnsOverHttps: true
+  sandboxMode: "strict"
+updates:
+  autoUpdate: true
+  channel: "stable"
+ui:
+  telemetryOptIn: false
+```
+
+---
+
+## Telemetry, performance, and reliability
+
+- **Performance targets:**  
+  **CPU:** <5% typical; **RAM:** <200MB; **startup:** <2s; **shutdown:** <3s; **latency p95:** regional target <250 ms.
+
+- **Metering cadence:**  
+  **Buckets:** 1s rolling windows; **summaries:** per session p50/p95 latency, error rate; **hashing:** BLAKE3 digest per log chunk.
+
+- **Health checks:**  
+  **Internal:** proxy loop, probe executor, metering integrity; **external:** coordinator heartbeat; **fail-fast:** auto-quarantine on policy breach.
+
+- **Observability:**  
+  **Metrics:** session count, throughput, probe pass rate, geo confidence; **alerts:** high error rate, low QoS, cap reached.
+
+- **Auto-recovery:**  
+  **Backoff:** exponential reconnection; **resume:** restore sessions when coordinator is reachable; **rollback:** revert update on health fail.
+
+---
+
+## Interfaces and data contracts
+
+- **Coordinator endpoints (client consumes):**  
+  - **/probes/request:** get ProbeRequest { sessionId, endpoint, size, nonce, ttl }.  
+  - **/probes/report:** post ProbeReport { bytes, duration, rtt, endpointSig, nonce } [signed].  
+  - **/sessions/control:** receive open/close signals and policy profiles.  
+  - **/attest/metering:** post signed metering bundles (bucket counters + digests).
+
+- **Local control API (client exposes):**  
+  - **GET /status:** node health, active sessions, QoS summary, earnings today.  
+  - **POST /control:** start/pause/stop.  
+  - **PUT /config:** update caps, schedules, policy; persist to disk.  
+  - **GET /logs/export:** return hashed, privacy-minimized session logs.
+
+#### Example metering bundle (canonical JSON)
+
+```json
+{
+  "nodeId": "ed25519:AAA...",
+  "sessionId": "c2b9f8c8-...-...",
+  "windowStart": "2025-12-19T14:00:00Z",
+  "windowEnd": "2025-12-19T14:05:00Z",
+  "bytesIngress": 24839201,
+  "bytesEgress": 24821033,
+  "latencyMsP50": 78,
+  "latencyMsP95": 212,
+  "errorRatePct": 0.4,
+  "accessLogHash": "b3:6f91f0...",
+  "nodeSig": "base64-ed25519-sig"
+}
+```
+
+---
+
+## Module internals and pseudocode
+
+#### Proxy engine (HTTPS-only egress)
+
+```text
+onNewSession(session):
+  applyPolicy(session.policyProfile)
+  setRateLimits(session.maxMbps, session.maxGB)
+  while session.active:
+    req = acceptBuyerRequest()
+    if !isHttps(req) or isBlocked(req.host): reject()
+    startTimer()
+    resp = forward(req)
+    updateMetering(bytes=resp.bytes, latency=elapsed(), error=resp.error)
+```
+
+#### Probe executor
+
+```text
+handleProbeRequest(pr):
+  data, tls = httpsFetch(pr.endpoint, pr.size)
+  report = {
+    sessionId: pr.sessionId,
+    bytes: data.length,
+    durationMs: data.duration,
+    rttMs: tls.handshakeRtt,
+    endpointSig: tls.endpointSignature,
+    nonce: pr.nonce
+  }
+  sendSigned(report)
+```
+
+#### Quarantine on policy breach
+
+```text
+if policyViolationDetected():
+  markNodeState("QUARANTINE")
+  stopAllSessions()
+  notifyUser("Policy violation; node paused")
+```
+
+---
+
+## Testing matrix and edge cases
+
+- **Functional tests:**  
+  **Session orchestration:** open/close; **metering correctness:** bucket totals vs synthetic traffic; **probe flow:** nonce integrity, timing.
+
+- **Performance tests:**  
+  **Throughput:** sustained vs burst caps; **latency:** p95 under load; **CPU/RAM:** steady-state and spikes.
+
+- **Security tests:**  
+  **Blocklists:** deny-listed domains; **HTTPS-only:** reject HTTP; **sandbox:** no LAN reachability; **key safety:** signature verification.
+
+- **Failure modes:**  
+  **Coordinator unreachable:** backoff and resume; **update failure:** rollback; **geo mismatch:** quarantine and prompt reconfig.
+
+- **User experience:**  
+  **Install in <3 minutes;** clear earnings/caps; **pause/stop works instantly;** opt-out deletes keys/config.
+
+---
+
+## Next steps
+
+- **Spec freeze:** Lock canonical JSON, local API, config schema.  
+- **Prototype:** Implement metering, proxy, probes; wire to coordinator endpoints.  
+- **Alpha:** Windows/macOS/Linux builds, installer scripts, basic UI.  
+- **Pilot:** 25 nodes, 2 buyers; iterate on caps, thresholds, and quarantine logic.
+
+If you want, I can sketch the UI screens (status, controls, earnings) and the installer flow, or provide a minimal Dockerfile and systemd service unit for deployment.
