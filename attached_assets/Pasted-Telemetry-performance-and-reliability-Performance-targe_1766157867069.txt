@@ -1,0 +1,76 @@
+Telemetry, performance, and reliability
+* Performance targets: CPU: <5% typical; RAM: <200MB; startup: <2s; shutdown: <3s; latency p95: regional target <250 ms.
+* Metering cadence: Buckets: 1s rolling windows; summaries: per session p50/p95 latency, error rate; hashing: BLAKE3 digest per log chunk.
+* Health checks: Internal: proxy loop, probe executor, metering integrity; external: coordinator heartbeat; fail-fast: auto-quarantine on policy breach.
+* Observability: Metrics: session count, throughput, probe pass rate, geo confidence; alerts: high error rate, low QoS, cap reached.
+* Auto-recovery: Backoff: exponential reconnection; resume: restore sessions when coordinator is reachable; rollback: revert update on health fail.
+
+Interfaces and data contracts
+* Coordinator endpoints (client consumes):
+    * /probes/request: get ProbeRequest { sessionId, endpoint, size, nonce, ttl }.
+    * /probes/report: post ProbeReport { bytes, duration, rtt, endpointSig, nonce } [signed].
+    * /sessions/control: receive open/close signals and policy profiles.
+    * /attest/metering: post signed metering bundles (bucket counters + digests).
+* Local control API (client exposes):
+    * GET /status: node health, active sessions, QoS summary, earnings today.
+    * POST /control: start/pause/stop.
+    * PUT /config: update caps, schedules, policy; persist to disk.
+    * GET /logs/export: return hashed, privacy-minimized session logs.
+Example metering bundle (canonical JSON)
+json
+
+{
+  "nodeId": "ed25519:AAA...",
+  "sessionId": "c2b9f8c8-...-...",
+  "windowStart": "2025-12-19T14:00:00Z",
+  "windowEnd": "2025-12-19T14:05:00Z",
+  "bytesIngress": 24839201,
+  "bytesEgress": 24821033,
+  "latencyMsP50": 78,
+  "latencyMsP95": 212,
+  "errorRatePct": 0.4,
+  "accessLogHash": "b3:6f91f0...",
+  "nodeSig": "base64-ed25519-sig"
+}
+
+Module internals and pseudocode
+Proxy engine (HTTPS-only egress)
+text
+
+onNewSession(session):
+  applyPolicy(session.policyProfile)
+  setRateLimits(session.maxMbps, session.maxGB)
+  while session.active:
+    req = acceptBuyerRequest()
+    if !isHttps(req) or isBlocked(req.host): reject()
+    startTimer()
+    resp = forward(req)
+    updateMetering(bytes=resp.bytes, latency=elapsed(), error=resp.error)
+Probe executor
+text
+
+handleProbeRequest(pr):
+  data, tls = httpsFetch(pr.endpoint, pr.size)
+  report = {
+    sessionId: pr.sessionId,
+    bytes: data.length,
+    durationMs: data.duration,
+    rttMs: tls.handshakeRtt,
+    endpointSig: tls.endpointSignature,
+    nonce: pr.nonce
+  }
+  sendSigned(report)
+Quarantine on policy breach
+text
+
+if policyViolationDetected():
+  markNodeState("QUARANTINE")
+  stopAllSessions()
+  notifyUser("Policy violation; node paused")
+
+Testing matrix and edge cases
+* Functional tests: Session orchestration: open/close; metering correctness: bucket totals vs synthetic traffic; probe flow: nonce integrity, timing.
+* Performance tests: Throughput: sustained vs burst caps; latency: p95 under load; CPU/RAM: steady-state and spikes.
+* Security tests: Blocklists: deny-listed domains; HTTPS-only: reject HTTP; sandbox: no LAN reachability; key safety: signature verification.
+* Failure modes: Coordinator unreachable: backoff and resume; update failure: rollback; geo mismatch: quarantine and prompt reconfig.
+* User experience: Install in <3 minutes; clear earnings/caps; pause/stop works instantly; opt-out deletes keys/config.

@@ -53,6 +53,23 @@ export async function registerRoutes(
     });
   });
 
+  app.get(api.health.get.path, async (req, res) => {
+    const healthStatus = await storage.getLatestHealth();
+    if (!healthStatus) {
+      return res.json({
+        id: 0,
+        timestamp: new Date().toISOString(),
+        coordinatorReachable: true,
+        internalProxyHealthy: true,
+        probeExecutorHealthy: true,
+        policyViolationDetected: false,
+        autoRecoveryActive: false,
+        alerts: []
+      });
+    }
+    res.json(healthStatus);
+  });
+
   app.post(api.control.post.path, async (req, res) => {
     const action = req.params.action;
     if (action === "start") daemonStatus = "running";
@@ -96,17 +113,41 @@ export async function registerRoutes(
   setInterval(async () => {
     if (daemonStatus !== "running") return;
 
-    // Simulate varying load
+    // Simulate varying load with error and probe metrics
     const baseIngress = Math.random() * 5;
     const baseEgress = Math.random() * 4;
+    const errorRate = Math.random() * 2; // 0-2% error rate
+    const probePassRate = 95 + Math.random() * 5; // 95-100% probe pass rate
+    const latency = Math.floor(Math.random() * 150) + 50; // 50-200ms p95
     
     await storage.addMetric({
       ingressRate: baseIngress,
       egressRate: baseEgress,
       activeSessions: Math.floor(Math.random() * 5) + 1,
-      cpuUsage: Math.random() * 10 + 2,
-      memoryUsage: Math.floor(Math.random() * 50) + 100,
+      cpuUsage: Math.random() * 5 + 1, // <5% target
+      memoryUsage: Math.floor(Math.random() * 50) + 100, // <200MB target
+      errorRatePct: errorRate,
+      probePassRatePct: probePassRate,
+      latencyP95: latency,
     });
+
+    // Simulate occasional alerts based on thresholds
+    const alerts: any[] = [];
+    if (errorRate > 1.5) alerts.push({ level: 'warning' as const, message: 'High error rate detected', timestamp: new Date().toISOString() });
+    if (latency > 250) alerts.push({ level: 'warning' as const, message: 'Latency exceeds regional target', timestamp: new Date().toISOString() });
+    if (probePassRate < 90) alerts.push({ level: 'error' as const, message: 'Low probe pass rate', timestamp: new Date().toISOString() });
+
+    // Update health status every 10 seconds
+    if (Math.random() > 0.5) {
+      await storage.updateHealth({
+        coordinatorReachable: true,
+        internalProxyHealthy: true,
+        probeExecutorHealthy: true,
+        policyViolationDetected: false,
+        autoRecoveryActive: false,
+        alerts: alerts as any,
+      });
+    }
   }, 5000);
 
   // Initialize Seed Data if empty

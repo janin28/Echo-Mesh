@@ -1,10 +1,10 @@
 
 import { db } from "./db";
 import {
-  config, sessions, metrics, logs,
+  config, sessions, metrics, logs, health,
   type Config, type InsertConfig,
   type Session, type InsertSession,
-  type Metric, type Log,
+  type Metric, type Log, type Health,
   type ConfigUpdateRequest
 } from "@shared/schema";
 import { eq, desc, asc } from "drizzle-orm";
@@ -27,12 +27,24 @@ export interface IStorage {
   getLogs(limit?: number): Promise<Log[]>;
   addLog(log: typeof logs.$inferInsert): Promise<Log>;
 
+  // Health
+  getLatestHealth(): Promise<Health | undefined>;
+  updateHealth(updates: Partial<Health>): Promise<Health>;
+
   // Dashboard Stats (Aggregated)
   getDashboardStats(): Promise<{
     earningsToday: number;
     totalDataToday: number;
     reputationScore: number;
     uptimeSeconds: number;
+    health: {
+      coordinatorReachable: boolean;
+      internalProxyHealthy: boolean;
+      probeExecutorHealthy: boolean;
+      policyViolationDetected: boolean;
+      autoRecoveryActive: boolean;
+      alerts: { level: 'error' | 'warning' | 'info'; message: string; timestamp: string }[];
+    };
   }>;
 }
 
@@ -101,15 +113,40 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async getLatestHealth(): Promise<Health | undefined> {
+    const [h] = await db.select().from(health).orderBy(desc(health.timestamp)).limit(1);
+    return h;
+  }
+
+  async updateHealth(updates: Partial<Health>): Promise<Health> {
+    const existing = await this.getLatestHealth();
+    if (existing) {
+      const [updated] = await db.update(health)
+        .set(updates)
+        .where(eq(health.id, existing.id))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(health).values(updates as any).returning();
+      return created;
+    }
+  }
+
   async getDashboardStats() {
-    // In a real app, this would aggregate from metrics/sessions tables
-    // For MVP, we'll return mock values or values stored in a 'stats' table if we had one.
-    // Here we'll just mock it or calculate simply.
+    const latestHealth = await this.getLatestHealth();
     return {
       earningsToday: 1.25,
       totalDataToday: 4.5,
       reputationScore: 98,
-      uptimeSeconds: 14500
+      uptimeSeconds: 14500,
+      health: {
+        coordinatorReachable: latestHealth?.coordinatorReachable ?? true,
+        internalProxyHealthy: latestHealth?.internalProxyHealthy ?? true,
+        probeExecutorHealthy: latestHealth?.probeExecutorHealthy ?? true,
+        policyViolationDetected: latestHealth?.policyViolationDetected ?? false,
+        autoRecoveryActive: latestHealth?.autoRecoveryActive ?? false,
+        alerts: (latestHealth?.alerts as any) ?? [],
+      }
     };
   }
 }

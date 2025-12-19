@@ -39,6 +39,21 @@ export const metrics = pgTable("metrics", {
   activeSessions: integer("active_sessions").default(0),
   cpuUsage: doublePrecision("cpu_usage").default(0),
   memoryUsage: integer("memory_usage").default(0), // MB
+  errorRatePct: doublePrecision("error_rate_pct").default(0), // Percentage of failed requests
+  probePassRatePct: doublePrecision("probe_pass_rate_pct").default(100), // Percentage of successful probes
+  latencyP95: integer("latency_p95_ms").default(0), // p95 latency in ms
+});
+
+// Health Status
+export const health = pgTable("health", {
+  id: serial("id").primaryKey(),
+  timestamp: timestamp("timestamp").defaultNow(),
+  coordinatorReachable: boolean("coordinator_reachable").default(true),
+  internalProxyHealthy: boolean("internal_proxy_healthy").default(true),
+  probeExecutorHealthy: boolean("probe_executor_healthy").default(true),
+  policyViolationDetected: boolean("policy_violation_detected").default(false),
+  autoRecoveryActive: boolean("auto_recovery_active").default(false),
+  alerts: jsonb("alerts").$type<{ level: 'error' | 'warning' | 'info'; message: string; timestamp: string }[]>().default([]),
 });
 
 // Activity Logs
@@ -56,6 +71,9 @@ export const insertSessionSchema = createInsertSchema(sessions);
 export const insertMetricSchema = createInsertSchema(metrics).omit({ id: true, timestamp: true });
 export const insertLogSchema = createInsertSchema(logs).omit({ id: true, timestamp: true });
 
+// === SCHEMAS ===
+export const insertHealthSchema = createInsertSchema(health).omit({ id: true, timestamp: true });
+
 // === EXPLICIT TYPES ===
 export type Config = typeof config.$inferSelect;
 export type InsertConfig = z.infer<typeof insertConfigSchema>;
@@ -64,14 +82,24 @@ export type Session = typeof sessions.$inferSelect;
 export type InsertSession = z.infer<typeof insertSessionSchema>;
 
 export type Metric = typeof metrics.$inferSelect;
+export type Health = typeof health.$inferSelect;
 export type Log = typeof logs.$inferSelect;
 
 // Request/Response Types
 export type ConfigUpdateRequest = Partial<InsertConfig>;
+export type HealthStatus = {
+  coordinatorReachable: boolean;
+  internalProxyHealthy: boolean;
+  probeExecutorHealthy: boolean;
+  policyViolationDetected: boolean;
+  autoRecoveryActive: boolean;
+  alerts: { level: 'error' | 'warning' | 'info'; message: string; timestamp: string }[];
+};
 export type DashboardStats = {
   status: 'running' | 'paused' | 'stopped';
   earningsToday: number;
   totalDataToday: number; // GB
   reputationScore: number;
   uptimeSeconds: number;
+  health: HealthStatus;
 };

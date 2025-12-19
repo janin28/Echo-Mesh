@@ -1,6 +1,6 @@
 
 import { z } from 'zod';
-import { insertConfigSchema, config, sessions, metrics, logs } from './schema';
+import { insertConfigSchema, config, sessions, metrics, logs, health } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -46,7 +46,28 @@ export const api = {
           totalDataToday: z.number(),
           reputationScore: z.number(),
           uptimeSeconds: z.number(),
+          health: z.object({
+            coordinatorReachable: z.boolean(),
+            internalProxyHealthy: z.boolean(),
+            probeExecutorHealthy: z.boolean(),
+            policyViolationDetected: z.boolean(),
+            autoRecoveryActive: z.boolean(),
+            alerts: z.array(z.object({
+              level: z.enum(['error', 'warning', 'info']),
+              message: z.string(),
+              timestamp: z.string(),
+            })),
+          }),
         }),
+      },
+    },
+  },
+  health: {
+    get: {
+      method: 'GET' as const,
+      path: '/api/health',
+      responses: {
+        200: z.custom<typeof health.$inferSelect>(),
       },
     },
   },
