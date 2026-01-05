@@ -40,3 +40,9 @@ waitForPort = 5000
 
 [objectStorage]
 defaultBucketID = "replit-objstore-595071c7-2b12-4b83-bdab-08adc834c8cb"
+
+[userenv]
+
+[userenv.shared]
+VITE_SOLANA_PUBKEY = "GtUgs8UkoT4LUVdARY7HNrzFx83QXFou5mL4cknDHSgc"
+SOLANA_RPC_URL = "https://solana-devnet.core.chainstack.com/a7a8e0df62f2a5c5ff7239ca353df02e"

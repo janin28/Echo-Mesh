@@ -31,6 +31,11 @@ export default function Overview() {
           <div>
             <h1 className="text-3xl font-bold font-display text-glow">Overview</h1>
             <p className="text-muted-foreground mt-1">Real-time node performance and metrics.</p>
+            {import.meta.env.VITE_SOLANA_PUBKEY && (
+              <p className="text-xs font-mono text-primary/70 mt-2 truncate max-w-[300px]" title={import.meta.env.VITE_SOLANA_PUBKEY}>
+                Wallet: {import.meta.env.VITE_SOLANA_PUBKEY}
+              </p>
+            )}
           </div>
           
           <div className="flex items-center gap-4">
