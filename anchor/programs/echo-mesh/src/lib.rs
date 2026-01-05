@@ -1,6 +1,8 @@
 use anchor_lang::prelude::*;
 
-declare_id!("GtUgs8UkoT4LUVdARY7HNrzFx83QXFou5mL4cknDHSgc");
+declare_id!("GtUgs8UkoT4LUVdARY7HNrzFx83QXFou5mL4cknDHSgc"); // This is the user's wallet, placeholder for program ID
+// TODO: Replace with actual program ID after 'anchor build'
+
 
 #[program]
 pub mod echo_mesh {
