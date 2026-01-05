@@ -236,8 +236,8 @@ export class DatabaseStorage implements IStorage {
     const node = await this.getOrCreateNode("dev-node-id");
     
     return {
-      earningsToday: earningsToday || 1.25, // Fallback to mock for visual consistency if empty
-      totalDataToday: totalDataToday || 4.5,
+      earningsToday: earningsToday, // Use real data from payouts
+      totalDataToday: totalDataToday, // Use real data from metrics
       reputationScore: node.reputation,
       uptimeSeconds: 14500,
       health: {
