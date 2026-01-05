@@ -1,17 +1,17 @@
 [toolchain]
 
 [features]
-resolution = true
+seeds = false
 skip-lint = false
 
-[programs.localnet]
-echo_mesh = "7CYDijxZh9A5wAbSZHdknTmpzw84p6zEz1BdNvrd5SXL"
+[programs.devnet]
+echo_mesh = "GtUgs8UkoT4LUVdARY7HNrzFx83QXFou5mL4cknDHSgc"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
