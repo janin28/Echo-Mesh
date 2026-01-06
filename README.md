@@ -2,6 +2,13 @@
 
 EchoMesh is a revolutionary decentralized bandwidth-sharing protocol that transforms dormant internet capacity into a liquid, high-performance network asset. By bridging local connectivity with a secure, blockchain-verified economy, EchoMesh empowers users to monetize their idle resources while providing a robust backbone for the next generation of privacy-centric web services.
 
+## 📂 Documentation & Guides
+- **[Project Overview](./PROJECT_OVERVIEW.md)**: Our vision, features, and roadmap.
+- **[Marketing & Collaboration Guide](./MARKETING_GUIDE.md)**: How to join the network and collaborate.
+- **[User Guide](./GUIDE.md)**: How to run and manage your node.
+- **[Solana Setup](./SOLANA_SETUP.md)**: Integration details and blockchain configuration.
+- **[API Documentation](./API_DOCS.md)**: Technical reference for developers.
+
 ## 🚀 Vision
 Our mission is to democratize internet access by building a community-owned mesh network that is resilient, anonymous, and hyper-efficient. We believe in an internet where every node is an active participant in a fair-value exchange.
 
